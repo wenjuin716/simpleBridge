@@ -55,7 +55,17 @@ enum lb_policy{
 struct nic_priv {
     /* you can use array to queue more packet */
     u32           msg_enable;
+	
+	struct net_device		*dev;
+	struct list_head		port_list;
 };
+
+struct nic_bridge_port {
+	struct nic_priv		*br_priv;
+	struct net_device		*dev;
+	struct list_head		list;
+};
+
 
 #if 1	/* for netlink control */
 struct sock *nl_sk = NULL;	/* netlink socket */

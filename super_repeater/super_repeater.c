@@ -18,6 +18,8 @@ MODULE_AUTHOR("Brook");
 MODULE_DESCRIPTION("Kernel module for demo");
 MODULE_LICENSE("GPL");
 
+#define br_port_get(dev) ((struct nic_bridge_port *) dev->rx_handler_data)
+
 #if 1 /* WenJuin add for super repeater net_device  */
 static struct net_device *nic_dev_lb;
 static struct net_device *dev_2g;
@@ -238,6 +240,23 @@ struct sk_buff *lb_pass_frame_up(struct sk_buff *skb)
 	return NULL;
 }
 
+static struct nic_bridge_port *new_nbp(struct nic_priv *priv,
+				       struct net_device *dev)
+{
+	struct nic_bridge_port *p;
+
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	if (p == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	p->br_priv = priv;
+	dev_hold(dev);
+	p->dev = dev;
+
+	return p;
+}
+
+
 /* netlink handler function */
 static void nl_recv_msg(struct sk_buff *skb)
 {
@@ -245,6 +264,9 @@ static void nl_recv_msg(struct sk_buff *skb)
     int pid;
     nlmsg_type msgtype;
 	struct net_device *dev = NULL;
+	struct nic_bridge_port *p;
+	struct nic_priv *priv;
+	bool flag = false;
 
     printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
 
@@ -259,10 +281,26 @@ static void nl_recv_msg(struct sk_buff *skb)
     switch(msgtype)
     {
     case NLMSG_ADDIF:
+		priv = netdev_priv(nic_dev_lb);
+
+		rcu_read_lock();
+		list_for_each_entry_rcu(p, &priv->port_list, list) {
+			if(strncmp(p->dev->name, ((nl_msg *)nlmsg_data(nlh))->data, strlen(((nl_msg *)nlmsg_data(nlh))->data)) == 0){
+				printk(KERN_INFO "%s is already in %s.\n", ((nl_msg *)nlmsg_data(nlh))->data, nic_dev_lb->name);
+				flag = true;
+			}
+		}
+		rcu_read_unlock();
+		
 		rtnl_lock();
         dev = dev_get_by_name(&init_net, ((nl_msg *)nlmsg_data(nlh))->data);
-        if(dev) {	
-			netdev_rx_handler_register(dev, lb_pass_frame_up, NULL);
+        if(dev && flag == false) {
+			priv = netdev_priv(nic_dev_lb);
+			p = new_nbp(priv, dev);
+			netdev_rx_handler_register(dev, lb_pass_frame_up, p);
+
+			list_add_rcu(&p->list, &priv->port_list);
+			
             dev_put(dev);
             dev = NULL;
         }else{
@@ -271,10 +309,30 @@ static void nl_recv_msg(struct sk_buff *skb)
 		rtnl_unlock();
 		break;
 	case NLMSG_DELIF:
+		priv = netdev_priv(nic_dev_lb);
+
+		rcu_read_lock();
+		list_for_each_entry_rcu(p, &priv->port_list, list) {
+			if(strncmp(p->dev->name, ((nl_msg *)nlmsg_data(nlh))->data, strlen(((nl_msg *)nlmsg_data(nlh))->data)) == 0){
+				printk(KERN_INFO "%s is already in %s.\n", ((nl_msg *)nlmsg_data(nlh))->data, nic_dev_lb->name);
+				flag = true;
+			}
+		}
+		rcu_read_unlock();
+		
 		rtnl_lock();
         dev = dev_get_by_name(&init_net, ((nl_msg *)nlmsg_data(nlh))->data);
-        if(dev) {	
+        if(dev && flag == true) {
+			priv = netdev_priv(nic_dev_lb);
+			p = br_port_get(dev);
+			if (p->br_priv != priv)
+				return;
+			
+			list_del_rcu(&p->list);
+			kfree(p);
+			
 			netdev_rx_handler_unregister(dev);
+			
             dev_put(dev);
             dev = NULL;
         }else{
@@ -295,7 +353,7 @@ static void nl_recv_msg(struct sk_buff *skb)
 
 static struct net_device* nic_alloc_netdev(void)
 {
-	struct nic_priv *priv;
+	//struct nic_priv *priv;
     struct net_device *netdev;
 
 	netdev = alloc_netdev(sizeof(struct nic_priv), "br-lb%d",
@@ -313,13 +371,17 @@ static struct net_device* nic_alloc_netdev(void)
 static int __init brook_init(void)
 {
     int ret;
-    //struct nic_priv *priv;
+    struct nic_priv *priv;
 
     nic_dev_lb = nic_alloc_netdev();
     if (!nic_dev_lb) {
         pr_err("%s(#%d): alloc netdev[0] failed", __func__, __LINE__);
         return -ENOMEM;
     }
+
+	priv = netdev_priv(nic_dev_lb);
+	priv->dev = nic_dev_lb;
+	INIT_LIST_HEAD(&priv->port_list);
 
     ret = register_netdev(nic_dev_lb);
     if (ret) {
