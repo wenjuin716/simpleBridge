@@ -11,9 +11,27 @@ struct iovec iov;
 int sock_fd;
 struct msghdr msg;
 
+void usage(void){
+	printf("==========================\n");
+	printf("lbctl 0 <device name>\n");
+	printf("\tadd device into super repeater bridge\n");
+	printf("lbctl 1 <device name>\n");
+	printf("\tdelete device into super repeater bridge\n");
+	printf("lbctl 2 <policy>\n");
+	printf("\t0:RE_2G_ONLY\n");
+	printf("\t1:RE_5G_ONLY\n");	
+	printf("\t2:INTF_EQUAL_PRIO\n");		
+	printf("==========================\n");
+}
+
 void main(int argc, char** argv)
 {
 	nl_msg nlmsg;
+
+	if(argc == 1){
+		usage();
+		return;
+	}
 
 	switch(atoi(argv[1])){
 	case NLMSG_ADDIF:
@@ -37,7 +55,8 @@ void main(int argc, char** argv)
 		break;
 	default:
 		printf("No Msg to send\n");
-		break;
+		usage();
+		return;
 	}
 
 	sock_fd=socket(PF_NETLINK, SOCK_RAW, NETLINK_USER);  

@@ -1,5 +1,6 @@
 therer are two folder
 	super_repeater:
-		the kernel module of simple bridge, it deal with sk_buff delever.
+		1. the kernel module of simple bridge, it deal with sk_buff delever.
+		2. this net_deivce is base on snull sample code of LDD3.
 	lbctl-utils:
 		the user space control utility, it can set the deliver policy.

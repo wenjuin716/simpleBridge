@@ -26,7 +26,7 @@ static struct net_device *dev_2g;
 static struct net_device *dev_5g;
 #endif
 
-int policy = RE_5G_ONLY;
+int policy = INTF_EQUAL_PRIO;
 unsigned int lb_intf_index = 1;	//cur forwarding interface policy index, by default use 5g interface brcause it has more bandwidth.
 char* lb_intf_name[RE_INTF_NUM]={
 	RE_2G_INTF_NAME,
@@ -51,7 +51,7 @@ char* lb_intf_name[RE_INTF_NUM]={
     NETIF_MSG_HW            = 0x2000,
     NETIF_MSG_WOL           = 0x4000,
 */
-#define DEF_MSG_ENABLE 0xffff
+
 #if 0
 static void dump(unsigned char *buf)
 {
@@ -410,19 +410,34 @@ module_init(brook_init);
 
 static void __exit brook_exit(void)
 {
+	struct nic_priv *priv = netdev_priv(nic_dev_lb);
+	struct nic_bridge_port *p;
     pr_info("%s(#%d): remove module", __func__, __LINE__);
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(p, &priv->port_list, list) {
+		//unregister rx_handler, it need get rtnl lock
+		rtnl_lock();		
+		printk(KERN_INFO "unregister %s net_dev from %s.\n", p->dev->name, nic_dev_lb->name);
+		netdev_rx_handler_unregister(p->dev);
+		rtnl_unlock();
+		list_del_rcu(&p->list);
+		kfree(p);			
+	}
+	rcu_read_unlock();
+	
 	//release netdev
     unregister_netdev(nic_dev_lb);
     free_netdev(nic_dev_lb);
 
 	if(dev_2g) {	
-		printk(KERN_INFO "2.4g net_dev init fail, Can not get %s net_device.\n", RE_2G_INTF_NAME);
+		printk(KERN_INFO "release 2.4g(%s) net_dev.\n", RE_2G_INTF_NAME);
 	    dev_put(dev_2g);
 	    dev_2g = NULL;		
 	}
 
 	if(dev_5g) {	
-		printk(KERN_INFO "5g net_dev init fail, Can not get %s net_device.\n", RE_5G_INTF_NAME);
+		printk(KERN_INFO "release 5g(%s) net_dev.\n", RE_5G_INTF_NAME);
 	    dev_put(dev_5g);
 	    dev_5g = NULL;
 	}
